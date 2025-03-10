@@ -20,12 +20,14 @@ from PIL import Image
 from hyvideo.constants import PRECISION_TO_TYPE
 from safetensors.torch import load_file
 
+from loguru import logger as loguru_logger
+
 
 def convert_kohya_to_peft_keys(
-    kohya_dict: dict,
-    kohya_prefix="",
-    peft_prefix: str = "base_model.model",
-    device="cpu",
+        kohya_dict: dict,
+        kohya_prefix="",
+        peft_prefix: str = "base_model.model",
+        device="cpu",
 ) -> dict:
     peft_dict = {}
     for k, v in kohya_dict.items():
@@ -45,7 +47,8 @@ def convert_kohya_to_peft_keys(
         new_key = new_key.replace("lora_down", "lora_A.default")
         new_key = new_key.replace("lora_up", "lora_B.default")
         new_key = new_key.replace(
-            "_individual_token_refiner_blocks_", ".individual_token_refiner.blocks."
+            "_individual_token_refiner_blocks_",
+            ".individual_token_refiner.blocks."
         )
         new_key = new_key.replace("_mlp_fc", ".mlp.fc")
 
@@ -63,6 +66,7 @@ def load_lora(model, lora_path, device):
 
 
 def black_image(width, height):
+    # 按照 w，h 返回 全0图片
     black_image = Image.new("RGB", (width, height), (0, 0, 0))
     return black_image
 
@@ -73,7 +77,8 @@ def numpy_to_pil(images: np.ndarray) -> List[PIL.Image.Image]:
     images = (images * 255).round().astype("uint8")
     if images.shape[-1] == 1:
         # special case for grayscale (single channel) images
-        pil_images = [Image.fromarray(image.squeeze(), mode="L") for image in images]
+        pil_images = [Image.fromarray(image.squeeze(), mode="L") for image in
+                      images]
     else:
         pil_images = [Image.fromarray(image) for image in images]
 
@@ -82,27 +87,45 @@ def numpy_to_pil(images: np.ndarray) -> List[PIL.Image.Image]:
 
 def get_cond_latents(args, latents, vae):
     """get conditioned latent by decode and encode the first frame latents"""
-    first_image_latents = latents[:, :, 0, ...] if len(latents.shape) == 5 else latents
+    # latents shape: [b, c, f, h, w] / [b, c, h, w]
+    first_image_latents = latents[:, :, 0, ...] if len(
+        latents.shape) == 5 else latents  # 拿到第一帧
     first_image_latents = 1 / vae.config.scaling_factor * first_image_latents
+    # [b, c, 1, h, w]
+    # 这里的 shape 似乎不对
+    loguru_logger.log("MODEL_DEBUG",
+                      f"First image latents: {first_image_latents.shape}")
+    loguru_logger.log("MODEL_DEBUG",
+                      f"After unsqueeze:"
+                      f"First image latents: "
+                      f"{first_image_latents.unsqueeze(2).shape}")
     first_images = vae.decode(
         first_image_latents.unsqueeze(2).to(vae.dtype), return_dict=False
-    )[0]
+    )[0]  # 返回一个新的 Tensor
+    loguru_logger.log("MODEL_DEBUG",
+                      f"After vae decode:"
+                      f"First images: "
+                      f"{first_images.shape}")
     first_images = first_images.squeeze(2)
     first_images = (first_images / 2 + 0.5).clamp(0, 1)
     first_images = first_images.cpu().permute(0, 2, 3, 1).float().numpy()
     first_images = numpy_to_pil(first_images)
 
+    # 将 latents 转换回 PIL.Image
     image_transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
     )
-    first_images_pixel_values = [image_transform(image) for image in first_images]
+    first_images_pixel_values = [image_transform(image) for image in
+                                 first_images]
     first_images_pixel_values = (
-        torch.cat(first_images_pixel_values).unsqueeze(0).unsqueeze(2).to(vae.device)
+        torch.cat(first_images_pixel_values).unsqueeze(0).unsqueeze(2).to(
+            vae.device)
     )
 
     vae_dtype = PRECISION_TO_TYPE[args.vae_precision]
     with torch.autocast(
-        device_type="cuda", dtype=vae_dtype, enabled=vae_dtype != torch.float32
+            device_type="cuda", dtype=vae_dtype,
+            enabled=vae_dtype != torch.float32
     ):
         cond_latents = vae.encode(
             first_images_pixel_values
@@ -113,11 +136,14 @@ def get_cond_latents(args, latents, vae):
 
 
 def get_cond_images(args, latents, vae, is_uncond=False):
-    """get conditioned images by decode the first frame latents"""
+    """get conditioned images by decode the first frame latents,
+    return black images if is_uncond is True """
+    # 将 第一帧 转换成 图片，做法和 get_cond_latents 一致
     sematic_image_latents = (
         latents[:, :, 0, ...] if len(latents.shape) == 5 else latents
     )
-    sematic_image_latents = 1 / vae.config.scaling_factor * sematic_image_latents
+    sematic_image_latents = (1 / vae.config.scaling_factor *
+                             sematic_image_latents)
     semantic_images = vae.decode(
         sematic_image_latents.unsqueeze(2).to(vae.dtype), return_dict=False
     )[0]
@@ -125,6 +151,7 @@ def get_cond_images(args, latents, vae, is_uncond=False):
     semantic_images = (semantic_images / 2 + 0.5).clamp(0, 1)
     semantic_images = semantic_images.cpu().permute(0, 2, 3, 1).float().numpy()
     semantic_images = numpy_to_pil(semantic_images)
+    # 如果 is_uncond，就返回 全0图片
     if is_uncond:
         semantic_images = [
             black_image(img.size[0], img.size[1]) for img in semantic_images
@@ -157,16 +184,21 @@ def load_state_dict(args, model, logger):
             model_path = files[0]
             if len(files) > 1:
                 logger.warning(
-                    f"Multiple model weights found in {dit_weight}, using {model_path}"
+                    f"Multiple model weights found in {dit_weight}, using "
+                    f"{model_path}"
                 )
             bare_model = False
         else:
             raise ValueError(
-                f"Invalid model path: {dit_weight} with unrecognized weight format: "
-                f"{list(map(str, files))}. When given a directory as --dit-weight, only "
+                f"Invalid model path: {dit_weight} with unrecognized weight "
+                f"format: "
+                f"{list(map(str, files))}. When given a directory as "
+                f"--dit-weight, only "
                 f"`pytorch_model_*.pt`(provided by HunyuanVideo official) and "
-                f"`*_model_states.pt`(saved by deepspeed) can be parsed. If you want to load a "
-                f"specific weight file, please provide the full path to the file."
+                f"`*_model_states.pt`(saved by deepspeed) can be parsed. If "
+                f"you want to load a "
+                f"specific weight file, please provide the full path to the "
+                f"file."
             )
     else:
         if dit_weight.is_dir():
@@ -177,20 +209,27 @@ def load_state_dict(args, model, logger):
                 model_path = dit_weight / f"pytorch_model_{load_key}.pt"
                 bare_model = True
             elif any(str(f).endswith("_model_states.pt") for f in files):
-                files = [f for f in files if str(f).endswith("_model_states.pt")]
+                files = [f for f in files if
+                         str(f).endswith("_model_states.pt")]
                 model_path = files[0]
                 if len(files) > 1:
                     logger.warning(
-                        f"Multiple model weights found in {dit_weight}, using {model_path}"
+                        f"Multiple model weights found in {dit_weight}, "
+                        f"using {model_path}"
                     )
                 bare_model = False
             else:
                 raise ValueError(
-                    f"Invalid model path: {dit_weight} with unrecognized weight format: "
-                    f"{list(map(str, files))}. When given a directory as --dit-weight, only "
-                    f"`pytorch_model_*.pt`(provided by HunyuanVideo official) and "
-                    f"`*_model_states.pt`(saved by deepspeed) can be parsed. If you want to load a "
-                    f"specific weight file, please provide the full path to the file."
+                    f"Invalid model path: {dit_weight} with unrecognized "
+                    f"weight format: "
+                    f"{list(map(str, files))}. When given a directory as "
+                    f"--dit-weight, only "
+                    f"`pytorch_model_*.pt`(provided by HunyuanVideo official) "
+                    f"and "
+                    f"`*_model_states.pt`(saved by deepspeed) can be parsed. "
+                    f"If you want to load a "
+                    f"specific weight file, please provide the full path to "
+                    f"the file."
                 )
         elif dit_weight.is_file():
             model_path = dit_weight
@@ -201,16 +240,19 @@ def load_state_dict(args, model, logger):
     if not model_path.exists():
         raise ValueError(f"model_path not exists: {model_path}")
     logger.info(f"Loading torch model {model_path}...")
-    state_dict = torch.load(model_path, map_location=lambda storage, loc: storage)
+    state_dict = torch.load(model_path,
+                            map_location=lambda storage, loc: storage)
 
-    if bare_model == "unknown" and ("ema" in state_dict or "module" in state_dict):
+    if bare_model == "unknown" and (
+            "ema" in state_dict or "module" in state_dict):
         bare_model = False
     if bare_model is False:
         if load_key in state_dict:
             state_dict = state_dict[load_key]
         else:
             raise KeyError(
-                f"Missing key: `{load_key}` in the checkpoint: {model_path}. The keys in the checkpoint "
+                f"Missing key: `{load_key}` in the checkpoint: {model_path}. "
+                f"The keys in the checkpoint "
                 f"are: {list(state_dict.keys())}."
             )
     model.load_state_dict(state_dict, strict=True)
@@ -230,7 +272,8 @@ def set_reproducibility(enable, global_seed=None):
         # Configure the seed for reproducibility
         set_manual_seed(global_seed)
     # Set following debug environment variable
-    # See the link for details: https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
+    # See the link for details:
+    # https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     # Cudnn benchmarking
     torch.backends.cudnn.benchmark = not enable
@@ -241,17 +284,17 @@ def set_reproducibility(enable, global_seed=None):
 
 
 def prepare_model_inputs(
-    args,
-    batch: tuple,
-    device: Union[int, str],
-    model,
-    vae,
-    text_encoder,
-    text_encoder_2=None,
-    rope_theta_rescale_factor: Union[float, List[float]] = 1.0,
-    rope_interpolation_factor: Union[float, List[float]] = 1.0,
+        args,
+        batch: tuple,
+        device: Union[int, str],
+        model,
+        vae,
+        text_encoder,
+        text_encoder_2=None,
+        rope_theta_rescale_factor: Union[float, List[float]] = 1.0,
+        rope_interpolation_factor: Union[float, List[float]] = 1.0,
 ):
-    media, latents, *batch_args = batch
+    media, latents, *batch_args = batch  # media: torch.tensor(0)
     if len(batch_args) == 3:
         text_ids, text_mask, kwargs = batch_args
         text_ids_2, text_mask_2 = None, None
@@ -267,10 +310,11 @@ def prepare_model_inputs(
     text_ids = text_ids.to(device)
     text_mask = text_mask.to(device)
 
-    # ======================================== Encode media ======================================
+    # ======================================== Encode media
+    # ======================================
     # Used for 3D VAE with 2D inputs(image).
     # Prepare media shape for 2D/3D VAE
-    if len(latents.shape) == 1:
+    if len(latents.shape) == 1:  # 如果没有 latents，就将图片/视频转换成 latents
         if len(media.shape) == 4:
             # media is a batch of image with shape [b, c, h, w]
             if isinstance(vae, AutoencoderKLCausal3D):
@@ -281,28 +325,36 @@ def prepare_model_inputs(
                 media = rearrange(media, "b c f h w -> (b f) c h w")
         else:
             raise ValueError(
-                f"Only support media with shape (b, c, h, w) or (b, c, f, h, w), but got {media.shape}."
+                f"Only support media with shape (b, c, h, w) or (b, c, f, h, "
+                f"w), but got {media.shape}."
             )
 
         vae_dtype = PRECISION_TO_TYPE[args.vae_precision]
         with torch.autocast(
-            device_type="cuda", dtype=vae_dtype, enabled=vae_dtype != torch.float32
+                device_type="cuda", dtype=vae_dtype,
+                enabled=vae_dtype != torch.float32
         ):
             latents = vae.encode(media).latent_dist.sample()
             if hasattr(vae.config, "shift_factor") and vae.config.shift_factor:
-                latents.sub_(vae.config.shift_factor).mul_(vae.config.scaling_factor)
+                latents.sub_(vae.config.shift_factor).mul_(
+                    vae.config.scaling_factor)
             else:
                 latents.mul_(vae.config.scaling_factor)
-    elif len(latents.shape) == 5 or len(latents.shape) == 4:  # Using video/image cache
+    elif len(latents.shape) == 5 or len(
+            latents.shape) == 4:  # Using video/image cache
         latents = (
-            latents * vae.config.scaling_factor
+                latents * vae.config.scaling_factor
         )  # vae cache is not multiplied by scaling_factor
     else:
         raise ValueError(
-            f"Only support media/latent with shape (b, c, h, w) or (b, c, f, h, w), but got {media.shape} {latents.shape}."
+            f"Only support media/latent with shape (b, c, h, w) or (b, c, f, "
+            f"h, w), but got {media.shape} {latents.shape}."
         )
 
+    # 将 latents 中的第一帧拿出来，转换成图片，然后转换成 latents
+    # 原因是 VAE 提取 Latents 时会看到之后的帧，这样做可以避免这一点
     cond_latents = get_cond_latents(args, latents, vae)
+    # is_uncond：有一定的概率丢弃 semantic images，返回全黑图片
     is_uncond = (
         torch.tensor(1).to(torch.int64)
         if random.random() < args.sematic_cond_drop_p
@@ -310,9 +362,11 @@ def prepare_model_inputs(
     )
     semantic_images = get_cond_images(args, latents, vae, is_uncond=is_uncond)
 
-    # ======================================== Encode text ======================================
+    # ======================================== Encode text
+    # ======================================
     # Autocast is handled by text_encoder itself.
     # Whether to apply text_mask is determined by args.use_attention_mask.
+    # TODO: semantic images 的具体作用未知
     text_outputs = text_encoder.encode(
         {"input_ids": text_ids, "attention_mask": text_mask},
         data_type=batch_args[-1]["type"][0],
@@ -320,6 +374,7 @@ def prepare_model_inputs(
     )
     text_states = text_outputs.hidden_state
     text_mask = text_outputs.attention_mask
+    # 这个应该是 CLIP-ViT-L/14
     text_states_2 = (
         text_encoder_2.encode(
             {"input_ids": text_ids_2, "attention_mask": text_mask_2},
@@ -329,7 +384,8 @@ def prepare_model_inputs(
         else None
     )
 
-    # ======================================== Build RoPE ======================================
+    # ======================================== Build RoPE
+    # ======================================
     target_ndim = 3  # n-d RoPE
     ndim = len(latents.shape) - 2
     latents_size = list(latents.shape[-ndim:])
@@ -343,7 +399,8 @@ def prepare_model_inputs(
         rope_interpolation_factor=rope_interpolation_factor,
     )
 
-    # ===================================== Pack model kwargs ==================================
+    # ===================================== Pack model kwargs
+    # ==================================
     model_kwargs = dict(
         text_states=text_states,  # [b, 256, 4096]
         text_mask=text_mask,  # [b, 256]
@@ -353,7 +410,8 @@ def prepare_model_inputs(
         return_dict=True,
     )
 
-    return latents, model_kwargs, freqs_cos.shape[0], kwargs["type"][0], cond_latents
+    return latents, model_kwargs, freqs_cos.shape[0], kwargs["type"][
+        0], cond_latents
 
 
 def format_params(params):
@@ -372,18 +430,18 @@ def set_manual_seed(global_seed):
 
 
 def get_rope_freq_from_size(
-    args,
-    model,
-    latents_size,
-    ndim,
-    target_ndim,
-    rope_theta_rescale_factor=1.0,
-    rope_interpolation_factor=1.0,
+        args,
+        model,
+        latents_size,
+        ndim,
+        target_ndim,
+        rope_theta_rescale_factor=1.0,
+        rope_interpolation_factor=1.0,
 ):
-
     if isinstance(model.patch_size, int):
         assert all(s % model.patch_size == 0 for s in latents_size), (
-            f"Latent size(last {ndim} dimensions) should be divisible by patch size({model.patch_size}), "
+            f"Latent size(last {ndim} dimensions) should be divisible by "
+            f"patch size({model.patch_size}), "
             f"but got {latents_size}."
         )
         rope_sizes = [s // model.patch_size for s in latents_size]
@@ -392,20 +450,23 @@ def get_rope_freq_from_size(
         assert all(
             s % model.patch_size[idx] == 0 for idx, s in enumerate(latents_size)
         ), (
-            f"Latent size(last {ndim} dimensions) should be divisible by patch size({model.patch_size}), "
+            f"Latent size(last {ndim} dimensions) should be divisible by "
+            f"patch size({model.patch_size}), "
             f"but got {latents_size}."
         )
-        rope_sizes = [s // model.patch_size[idx] for idx, s in enumerate(latents_size)]
+        rope_sizes = [s // model.patch_size[idx] for idx, s in
+                      enumerate(latents_size)]
 
     if len(rope_sizes) != target_ndim:
-        rope_sizes = [1] * (target_ndim - len(rope_sizes)) + rope_sizes  # time axis
+        rope_sizes = [1] * (
+                target_ndim - len(rope_sizes)) + rope_sizes  # time axis
     head_dim = model.hidden_size // model.heads_num
     rope_dim_list = model.rope_dim_list
 
     if rope_dim_list is None:
         rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
     assert (
-        sum(rope_dim_list) == head_dim
+            sum(rope_dim_list) == head_dim
     ), "sum(rope_dim_list) should equal to head_dim of attention layer"
 
     freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
@@ -420,12 +481,14 @@ def get_rope_freq_from_size(
     return freqs_cos, freqs_sin
 
 
-# copy from https://github.com/huggingface/diffusers/blob/ec9bfa9e148b7764137dd92247ce859d915abcb0/examples/consistency_distillation/train_lcm_distill_lora_sd_wds.py#L258
+# copy from https://github.com/huggingface/diffusers/blob
+# /ec9bfa9e148b7764137dd92247ce859d915abcb0/examples/consistency_distillation
+# /train_lcm_distill_lora_sd_wds.py#L258
 # get kohya lora state dict
 def get_module_kohya_state_dict(module, prefix, dtype, adapter_name="default"):
     kohya_ss_state_dict = {}
     for peft_key, weight in get_peft_model_state_dict(
-        module, adapter_name=adapter_name
+            module, adapter_name=adapter_name
     ).items():
         kohya_key = peft_key.replace("base_model.model", prefix)
         kohya_key = kohya_key.replace("lora_A", "lora_down")
@@ -447,7 +510,7 @@ def get_module_kohya_state_dict(module, prefix, dtype, adapter_name="default"):
 def get_module_diffusers_state_dict(module, dtype, adapter_name="default"):
     diffusers_ss_state_dict = {}
     for peft_key, weight in get_peft_model_state_dict(
-        module, adapter_name=adapter_name
+            module, adapter_name=adapter_name
     ).items():
         diffusers_key = peft_key.replace("base_model.model", "diffusion_model")
         diffusers_ss_state_dict[diffusers_key] = weight.to(dtype)

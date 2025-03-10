@@ -5,14 +5,14 @@ class sde:
     """SDE solver class"""
 
     def __init__(
-        self,
-        drift,
-        diffusion,
-        *,
-        t0,
-        t1,
-        num_steps,
-        sampler_type,
+            self,
+            drift,
+            diffusion,
+            *,
+            t0,
+            t1,
+            num_steps,
+            sampler_type,
     ):
         assert t0 < t1, "SDE sampler has to be in forward time"
 
@@ -48,7 +48,8 @@ class sde:
         )  # at last time point we do not perform the heun step
 
     def __forward_fn(self):
-        """TODO: generalize here by adding all private functions ending with steps to it"""
+        """OriginalTODO: generalize here by adding all private functions
+        ending with steps to it"""
         sampler_dict = {
             "Euler": self.__Euler_Maruyama_step,
             "Heun": self.__Heun_step,
@@ -79,23 +80,25 @@ class ode:
     """ODE solver class"""
 
     def __init__(
-        self,
-        drift,
-        *,
-        t0,
-        t1,
-        sampler_type,
-        num_steps,
-        atol,
-        rtol,
-        time_shifting_factor=None,
+            self,
+            drift,
+            *,
+            t0,
+            t1,
+            sampler_type,
+            num_steps,
+            atol,
+            rtol,
+            time_shifting_factor=None,
     ):
         assert t0 < t1, "ODE sampler has to be in forward time"
 
         self.drift = drift
         self.t = th.linspace(t0, t1, num_steps)
         if time_shifting_factor:
-            self.t = self.t / (self.t + time_shifting_factor - time_shifting_factor * self.t)
+            self.t = self.t / (
+                        self.t + time_shifting_factor - time_shifting_factor
+                        * self.t)
         self.atol = atol
         self.rtol = rtol
         self.sampler_type = sampler_type
@@ -105,14 +108,18 @@ class ode:
         device = x[0].device if isinstance(x, tuple) else x.device
 
         def _fn(t, x):
-            t = th.ones(x[0].size(0)).to(device) * t if isinstance(x, tuple) else th.ones(x.size(0)).to(device) * t
+            t = th.ones(x[0].size(0)).to(device) * t if isinstance(x,
+                                                                   tuple) \
+                else th.ones(
+                x.size(0)).to(device) * t
             model_output = self.drift(x, t, model, **model_kwargs)
             return model_output
 
         t = self.t.to(device)
         atol = [self.atol] * len(x) if isinstance(x, tuple) else [self.atol]
         rtol = [self.rtol] * len(x) if isinstance(x, tuple) else [self.rtol]
-        samples = odeint(_fn, x, t, method=self.sampler_type, atol=atol, rtol=rtol)
+        samples = odeint(_fn, x, t, method=self.sampler_type, atol=atol,
+                         rtol=rtol)
         return samples
 
     def sample_with_step_fn(self, x, step_fn):
@@ -121,5 +128,6 @@ class ode:
         t = self.t.to(device)
         atol = [self.atol] * len(x) if isinstance(x, tuple) else [self.atol]
         rtol = [self.rtol] * len(x) if isinstance(x, tuple) else [self.rtol]
-        samples = odeint(step_fn, x, t, method=self.sampler_type, atol=atol, rtol=rtol)
+        samples = odeint(step_fn, x, t, method=self.sampler_type, atol=atol,
+                         rtol=rtol)
         return samples

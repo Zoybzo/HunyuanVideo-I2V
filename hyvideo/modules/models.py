@@ -23,21 +23,23 @@ from .token_refiner import SingleTokenRefiner
 class MMDoubleStreamBlock(nn.Module):
     """
     A multimodal dit block with seperate modulation for
-    text and image/video, see more details (SD3): https://arxiv.org/abs/2403.03206
-                                     (Flux.1): https://github.com/black-forest-labs/flux
+    text and image/video, see more details (SD3):
+    https://arxiv.org/abs/2403.03206
+                                     (Flux.1):
+                                     https://github.com/black-forest-labs/flux
     """
 
     def __init__(
-        self,
-        hidden_size: int,
-        heads_num: int,
-        mlp_width_ratio: float,
-        mlp_act_type: str = "gelu_tanh",
-        qk_norm: bool = True,
-        qk_norm_type: str = "rms",
-        qkv_bias: bool = False,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
+            self,
+            hidden_size: int,
+            heads_num: int,
+            mlp_width_ratio: float,
+            mlp_act_type: str = "gelu_tanh",
+            qk_norm: bool = True,
+            qk_norm_type: str = "rms",
+            qkv_bias: bool = False,
+            dtype: Optional[torch.dtype] = None,
+            device: Optional[torch.device] = None,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -62,12 +64,14 @@ class MMDoubleStreamBlock(nn.Module):
         )
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.img_attn_q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6,
+                          **factory_kwargs)
             if qk_norm
             else nn.Identity()
         )
         self.img_attn_k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6,
+                          **factory_kwargs)
             if qk_norm
             else nn.Identity()
         )
@@ -100,12 +104,14 @@ class MMDoubleStreamBlock(nn.Module):
             hidden_size, hidden_size * 3, bias=qkv_bias, **factory_kwargs
         )
         self.txt_attn_q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6,
+                          **factory_kwargs)
             if qk_norm
             else nn.Identity()
         )
         self.txt_attn_k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6,
+                          **factory_kwargs)
             if qk_norm
             else nn.Identity()
         )
@@ -132,16 +138,17 @@ class MMDoubleStreamBlock(nn.Module):
         self.deterministic = False
 
     def forward(
-        self,
-        img: torch.Tensor,
-        txt: torch.Tensor,
-        vec: torch.Tensor,
-        cu_seqlens_q: Optional[torch.Tensor] = None,
-        cu_seqlens_kv: Optional[torch.Tensor] = None,
-        max_seqlen_q: Optional[int] = None,
-        max_seqlen_kv: Optional[int] = None,
-        freqs_cis: tuple = None,
+            self,
+            img: torch.Tensor,
+            txt: torch.Tensor,
+            vec: torch.Tensor,
+            cu_seqlens_q: Optional[torch.Tensor] = None,
+            cu_seqlens_kv: Optional[torch.Tensor] = None,
+            max_seqlen_q: Optional[int] = None,
+            max_seqlen_kv: Optional[int] = None,
+            freqs_cis: tuple = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # scale / shift / gate
         (
             img_mod1_shift,
             img_mod1_scale,
@@ -174,10 +181,12 @@ class MMDoubleStreamBlock(nn.Module):
 
         # Apply RoPE if needed.
         if freqs_cis is not None:
-            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
+            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis,
+                                              head_first=False)
             assert (
-                img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
-            ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+                    img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
+            ), (f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: "
+                f"{img_kk.shape}, img_k: {img_k.shape}")
             img_q, img_k = img_qq, img_kk
 
         # Prepare txt for attention.
@@ -198,9 +207,10 @@ class MMDoubleStreamBlock(nn.Module):
         k = torch.cat((img_k, txt_k), dim=1)
         v = torch.cat((img_v, txt_v), dim=1)
         assert (
-            cu_seqlens_q.shape[0] == 2 * img.shape[0] + 1
-        ), f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, img.shape[0]:{img.shape[0]}"
-        
+                cu_seqlens_q.shape[0] == 2 * img.shape[0] + 1
+        ), (f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, img.shape"
+            f"[0]:{img.shape[0]}")
+
         # attention computation start
         if not self.hybrid_seq_parallel_attn:
             attn = attention(
@@ -224,17 +234,18 @@ class MMDoubleStreamBlock(nn.Module):
                 cu_seqlens_q=cu_seqlens_q,
                 cu_seqlens_kv=cu_seqlens_kv
             )
-            
+
         # attention computation end
 
-        img_attn, txt_attn = attn[:, : img.shape[1]], attn[:, img.shape[1] :]
+        img_attn, txt_attn = attn[:, : img.shape[1]], attn[:, img.shape[1]:]
 
         # Calculate the img bloks.
         img = img + apply_gate(self.img_attn_proj(img_attn), gate=img_mod1_gate)
         img = img + apply_gate(
             self.img_mlp(
                 modulate(
-                    self.img_norm2(img), shift=img_mod2_shift, scale=img_mod2_scale
+                    self.img_norm2(img), shift=img_mod2_shift,
+                    scale=img_mod2_scale
                 )
             ),
             gate=img_mod2_gate,
@@ -245,7 +256,8 @@ class MMDoubleStreamBlock(nn.Module):
         txt = txt + apply_gate(
             self.txt_mlp(
                 modulate(
-                    self.txt_norm2(txt), shift=txt_mod2_shift, scale=txt_mod2_scale
+                    self.txt_norm2(txt), shift=txt_mod2_shift,
+                    scale=txt_mod2_scale
                 )
             ),
             gate=txt_mod2_gate,
@@ -263,16 +275,16 @@ class MMSingleStreamBlock(nn.Module):
     """
 
     def __init__(
-        self,
-        hidden_size: int,
-        heads_num: int,
-        mlp_width_ratio: float = 4.0,
-        mlp_act_type: str = "gelu_tanh",
-        qk_norm: bool = True,
-        qk_norm_type: str = "rms",
-        qk_scale: float = None,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
+            self,
+            hidden_size: int,
+            heads_num: int,
+            mlp_width_ratio: float = 4.0,
+            mlp_act_type: str = "gelu_tanh",
+            qk_norm: bool = True,
+            qk_norm_type: str = "rms",
+            qk_scale: float = None,
+            dtype: Optional[torch.dtype] = None,
+            device: Optional[torch.device] = None,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -296,12 +308,14 @@ class MMSingleStreamBlock(nn.Module):
 
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6,
+                          **factory_kwargs)
             if qk_norm
             else nn.Identity()
         )
         self.k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6,
+                          **factory_kwargs)
             if qk_norm
             else nn.Identity()
         )
@@ -326,23 +340,25 @@ class MMSingleStreamBlock(nn.Module):
         self.deterministic = False
 
     def forward(
-        self,
-        x: torch.Tensor,
-        vec: torch.Tensor,
-        txt_len: int,
-        cu_seqlens_q: Optional[torch.Tensor] = None,
-        cu_seqlens_kv: Optional[torch.Tensor] = None,
-        max_seqlen_q: Optional[int] = None,
-        max_seqlen_kv: Optional[int] = None,
-        freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
+            self,
+            x: torch.Tensor,
+            vec: torch.Tensor,
+            txt_len: int,
+            cu_seqlens_q: Optional[torch.Tensor] = None,
+            cu_seqlens_kv: Optional[torch.Tensor] = None,
+            max_seqlen_q: Optional[int] = None,
+            max_seqlen_kv: Optional[int] = None,
+            freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
     ) -> torch.Tensor:
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
         qkv, mlp = torch.split(
-            self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1
+            self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim],
+            dim=-1
         )
 
-        q, k, v = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
+        q, k, v = rearrange(qkv, "B L (K H D) -> K B L H D", K=3,
+                            H=self.heads_num)
 
         # Apply QK-Norm if needed.
         q = self.q_norm(q).to(v)
@@ -352,19 +368,21 @@ class MMSingleStreamBlock(nn.Module):
         if freqs_cis is not None:
             img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
             img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
-            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
+            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis,
+                                              head_first=False)
             assert (
-                img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
-            ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+                    img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
+            ), (f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_"
+                f"kk: {img_kk.shape}, img_k: {img_k.shape}")
             img_q, img_k = img_qq, img_kk
             q = torch.cat((img_q, txt_q), dim=1)
             k = torch.cat((img_k, txt_k), dim=1)
 
         # Compute attention.
         assert (
-            cu_seqlens_q.shape[0] == 2 * x.shape[0] + 1
+                cu_seqlens_q.shape[0] == 2 * x.shape[0] + 1
         ), f"cu_seqlens_q.shape:{cu_seqlens_q.shape}, x.shape[0]:{x.shape[0]}"
-        
+
         # attention computation start
         if not self.hybrid_seq_parallel_attn:
             attn = attention(
@@ -390,7 +408,8 @@ class MMSingleStreamBlock(nn.Module):
             )
         # attention computation end
 
-        # Compute activation in mlp stream, cat again and run second linear layer.
+        # Compute activation in mlp stream, cat again and run second linear
+        # layer.
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
         return x + apply_gate(output, gate=mod_gate)
 
@@ -399,7 +418,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
     """
     HunyuanVideo Transformer backbone
 
-    Inherited from ModelMixin and ConfigMixin for compatibility with diffusers' sampler StableDiffusionPipeline.
+    Inherited from ModelMixin and ConfigMixin for compatibility with
+    diffusers' sampler StableDiffusionPipeline.
 
     Reference:
     [1] Flux.1: https://github.com/black-forest-labs/flux
@@ -449,39 +469,41 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
     @register_to_config
     def __init__(
-        self,
-        args: Any,
-        patch_size: list = [1, 2, 2],
-        in_channels: int = 4,  # Should be VAE.config.latent_channels.
-        out_channels: int = None,
-        hidden_size: int = 3072,
-        heads_num: int = 24,
-        mlp_width_ratio: float = 4.0,
-        mlp_act_type: str = "gelu_tanh",
-        mm_double_blocks_depth: int = 20,
-        mm_single_blocks_depth: int = 40,
-        rope_dim_list: List[int] = [16, 56, 56],
-        qkv_bias: bool = True,
-        qk_norm: bool = True,
-        qk_norm_type: str = "rms",
-        guidance_embed: bool = False,  # For modulation.
-        text_projection: str = "single_refiner",
-        use_attention_mask: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
+            self,
+            args: Any,
+            patch_size: list = [1, 2, 2],
+            in_channels: int = 4,  # Should be VAE.config.latent_channels.
+            out_channels: int = None,
+            hidden_size: int = 3072,
+            heads_num: int = 24,
+            mlp_width_ratio: float = 4.0,
+            mlp_act_type: str = "gelu_tanh",
+            mm_double_blocks_depth: int = 20,
+            mm_single_blocks_depth: int = 40,
+            rope_dim_list: List[int] = [16, 56, 56],
+            qkv_bias: bool = True,
+            qk_norm: bool = True,
+            qk_norm_type: str = "rms",
+            guidance_embed: bool = False,  # For modulation.
+            text_projection: str = "single_refiner",
+            use_attention_mask: bool = True,
+            dtype: Optional[torch.dtype] = None,
+            device: Optional[torch.device] = None,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
 
         self.patch_size = patch_size
         self.in_channels = in_channels
-        self.out_channels = in_channels if out_channels is None else out_channels
+        self.out_channels = in_channels if out_channels is None else (
+            out_channels)
         self.unpatchify_channels = self.out_channels
         self.guidance_embed = guidance_embed
         self.rope_dim_list = rope_dim_list
 
         # Text projection. Default to linear projection.
-        # Alternative: TokenRefiner. See more details (LI-DiT): http://arxiv.org/abs/2406.11831
+        # Alternative: TokenRefiner. See more details (LI-DiT):
+        # http://arxiv.org/abs/2406.11831
         self.use_attention_mask = use_attention_mask
         self.text_projection = text_projection
 
@@ -492,14 +514,18 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         self.gradient_checkpoint = args.gradient_checkpoint
         self.gradient_checkpoint_layers = args.gradient_checkpoint_layers
         if self.gradient_checkpoint:
-            assert self.gradient_checkpoint_layers <= mm_double_blocks_depth + mm_single_blocks_depth, \
-                f"Gradient checkpoint layers must be less or equal than the depth of the model. " \
-                f"Got gradient_checkpoint_layers={self.gradient_checkpoint_layers} and " \
+            assert self.gradient_checkpoint_layers <= mm_double_blocks_depth + \
+                   mm_single_blocks_depth, \
+                f"Gradient checkpoint layers must be" \
+                f"less or equal than the depth of the model. " \
+                f"Got gradient_checkpoint_layers" \
+                f"={self.gradient_checkpoint_layers} and " \
                 f"depth={mm_double_blocks_depth + mm_single_blocks_depth}."
 
         if hidden_size % heads_num != 0:
             raise ValueError(
-                f"Hidden size {hidden_size} must be divisible by heads_num {heads_num}"
+                f"Hidden size {hidden_size} must be divisible by heads_num "
+                f"{heads_num}"
             )
         pe_dim = hidden_size // heads_num
         if sum(rope_dim_list) != pe_dim:
@@ -511,7 +537,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
 
         # image projection
         self.img_in = PatchEmbed(
-            self.patch_size, self.in_channels, self.hidden_size, **factory_kwargs
+            self.patch_size, self.in_channels, self.hidden_size,
+            **factory_kwargs
         )
 
         # text projection
@@ -524,7 +551,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             )
         elif self.text_projection == "single_refiner":
             self.txt_in = SingleTokenRefiner(
-                self.text_states_dim, hidden_size, heads_num, depth=2, **factory_kwargs
+                self.text_states_dim, hidden_size, heads_num, depth=2,
+                **factory_kwargs
             )
         else:
             raise NotImplementedError(
@@ -604,16 +632,18 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             block.disable_deterministic()
 
     def forward(
-        self,
-        x: torch.Tensor,
-        t: torch.Tensor,  # Should be in range(0, 1000).
-        text_states: torch.Tensor = None,
-        text_mask: torch.Tensor = None,  # Now we don't use it.
-        text_states_2: Optional[torch.Tensor] = None,  # Text embedding for modulation.
-        freqs_cos: Optional[torch.Tensor] = None,
-        freqs_sin: Optional[torch.Tensor] = None,
-        guidance: torch.Tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
-        return_dict: bool = True,
+            self,
+            x: torch.Tensor,
+            t: torch.Tensor,  # Should be in range(0, 1000).
+            text_states: torch.Tensor = None,
+            text_mask: torch.Tensor = None,  # Now we don't use it.
+            text_states_2: Optional[torch.Tensor] = None,
+            # Text embedding for modulation.
+            freqs_cos: Optional[torch.Tensor] = None,
+            freqs_sin: Optional[torch.Tensor] = None,
+            guidance: torch.Tensor = None,
+            # Guidance for modulation, should be cfg_scale x 1000.
+            return_dict: bool = True,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         out = {}
         img = x
@@ -638,7 +668,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     "Didn't get guidance strength for guidance distilled model."
                 )
 
-            # our timestep_embedding is merged into guidance_in(TimestepEmbedder)
+            # our timestep_embedding is merged into guidance_in(
+            # TimestepEmbedder)
             vec = vec + self.guidance_in(guidance)
 
         # Embed image and text.
@@ -646,7 +677,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         if self.text_projection == "linear":
             txt = self.txt_in(txt)
         elif self.text_projection == "single_refiner":
-            txt = self.txt_in(txt, t, text_mask if self.use_attention_mask else None)
+            txt = self.txt_in(txt, t,
+                              text_mask if self.use_attention_mask else None)
         else:
             raise NotImplementedError(
                 f"Unsupported text_projection: {self.text_projection}"
@@ -676,9 +708,13 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             ]
 
             if self.training and self.gradient_checkpoint and \
-                    (self.gradient_checkpoint_layers == -1 or layer_num < self.gradient_checkpoint_layers):
+                    (
+                            self.gradient_checkpoint_layers == -1 or
+                            layer_num < self.gradient_checkpoint_layers):
                 # print(f'gradient checkpointing...')
-                img, txt = torch.utils.checkpoint.checkpoint(ckpt_wrapper(block), *double_block_args, use_reentrant=False)
+                img, txt = torch.utils.checkpoint.checkpoint(
+                    ckpt_wrapper(block), *double_block_args,
+                    use_reentrant=False)
             else:
                 img, txt = block(*double_block_args)
 
@@ -698,15 +734,23 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 ]
 
                 if self.training and self.gradient_checkpoint and \
-                        (self.gradient_checkpoint_layers == -1 or layer_num + len(self.double_blocks) < self.gradient_checkpoint_layers):
-                    x = torch.utils.checkpoint.checkpoint(ckpt_wrapper(block), *single_block_args, use_reentrant=False)
+                        (
+                                self.gradient_checkpoint_layers == -1 or
+                                layer_num + len(
+                            self.double_blocks) <
+                                self.gradient_checkpoint_layers):
+                    x = torch.utils.checkpoint.checkpoint(ckpt_wrapper(block),
+                                                          *single_block_args,
+                                                          use_reentrant=False)
                 else:
                     x = block(*single_block_args)
 
         img = x[:, :img_seq_len, ...]
 
-        # ---------------------------- Final layer ------------------------------
-        img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
+        # ---------------------------- Final layer
+        # ------------------------------
+        img = self.final_layer(img,
+                               vec)  # (N, T, patch_size ** 2 * out_channels)
 
         img = self.unpatchify(img, tt, th, tw)
         if return_dict:
@@ -757,8 +801,10 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
     def set_input_tensor(self, input_tensor):
         pass
 
+
 #################################################################################
-#                             HunyuanVideo Configs                              #
+#                             HunyuanVideo Configs
+#                             #
 #################################################################################
 
 HUNYUAN_VIDEO_CONFIG = {

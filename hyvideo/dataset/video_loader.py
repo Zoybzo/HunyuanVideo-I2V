@@ -10,6 +10,7 @@ import pyarrow as pa
 
 from torch.utils.data import Dataset
 
+
 class VideoDataset(Dataset):
     def __init__(self,
                  data_jsons_path: str,
@@ -25,10 +26,14 @@ class VideoDataset(Dataset):
 
         Args:
             data_jsons_path (str): input data json path
-            sample_n_frames (int, optional): training video length. Defaults to 129.
-            sample_stride (int, optional): video frame sample stride. Defaults to 1 (No strid).
-            text_encoder (_type_, optional): text encoder to tokenize. Defaults to None.
-            text_encoder_2 (_type_, optional): second text encoder to tokenize. Defaults to None.
+            sample_n_frames (int, optional): training video length. Defaults
+            to 129.
+            sample_stride (int, optional): video frame sample stride.
+            Defaults to 1 (No strid).
+            text_encoder (_type_, optional): text encoder to tokenize.
+            Defaults to None.
+            text_encoder_2 (_type_, optional): second text encoder to
+            tokenize. Defaults to None.
             uncond_p (float, optional): text uncondition prod. Defaults to 0.0.
             args (_type_, optional): args. Defaults to None.
             logger (_type_, optional): logger. Defaults to None.
@@ -53,7 +58,8 @@ class VideoDataset(Dataset):
         height_list = []
         width_list = []
         for json_file in json_files:
-            with open(f"{data_jsons_path}/{json_file}", 'r', encoding='utf-8-sig') as file:
+            with open(f"{data_jsons_path}/{json_file}", 'r',
+                      encoding='utf-8-sig') as file:
                 data = json.load(file)
             video_id = data.get('video_id')
             latent_shape = data.get('latent_shape')
@@ -77,18 +83,22 @@ class VideoDataset(Dataset):
         ])
 
         video_id_array = pa.array(video_id_list, type=pa.string())
-        latent_shape_array = pa.array(latent_shape_list, type=pa.list_(pa.int64()))
+        latent_shape_array = pa.array(latent_shape_list,
+                                      type=pa.list_(pa.int64()))
         prompt_array = pa.array(prompt_list, type=pa.string())
         npy_save_path_array = pa.array(npy_save_path_list, type=pa.string())
         height_array = pa.array(height_list, type=pa.int64())
         width_array = pa.array(width_list, type=pa.int64())
 
-        record_batch = pa.RecordBatch.from_arrays([video_id_array, latent_shape_array, prompt_array,
-                                                   npy_save_path_array, height_array, width_array], schema=schema)
+        record_batch = pa.RecordBatch.from_arrays(
+            [video_id_array, latent_shape_array, prompt_array,
+             npy_save_path_array, height_array, width_array], schema=schema)
         self.table = pa.Table.from_batches([record_batch])
 
         s_time = time.time()
-        logger.info(f"load {data_jsons_path} \t cost {time.time() - s_time} s \t total length {len(self.table)}")
+        logger.info(
+            f"load {data_jsons_path} \t cost {time.time() - s_time} s \t "
+            f"total length {len(self.table)}")
 
     def __len__(self):
         return len(self.table)
@@ -116,7 +126,8 @@ class VideoDataset(Dataset):
     def get_batch(self, idx):
         videoid = self.table['video_id'][idx].as_py()
         prompt = self.table['prompt'][idx].as_py()
-        pixel_values = torch.tensor(0)
+        # TODO：这里应该添加额外的判断，当 Latents 不存在时，初始化成参考图片或者视频的 latents
+        pixel_values = torch.tensor(0)  # 全 0 的 pixel values？
 
         if random.random() < self.uncond_p:
             prompt = ''
@@ -124,7 +135,7 @@ class VideoDataset(Dataset):
         text_ids, text_mask = self.get_text_tokens(self.text_encoder, prompt)
         sample_n_frames = self.sample_n_frames
 
-        cache_path = self.table['npy_save_path'][idx].as_py()
+        cache_path = self.table['npy_save_path'][idx].as_py()  # 提前缓存了 latents
         latents = torch.from_numpy(np.load(cache_path)).squeeze(0)
         sample_n_latent = (sample_n_frames - 1) // 4 + 1
         start_idx = 0
@@ -132,10 +143,13 @@ class VideoDataset(Dataset):
 
         if latents.shape[1] < sample_n_latent:
             raise Exception(
-                f' videoid: {videoid} has wrong cache data for temporal buckets of shape {latents.shape}, expected length: {sample_n_latent}')
+                f' videoid: {videoid} has wrong cache data for temporal '
+                f'buckets of shape {latents.shape}, expected length: '
+                f'{sample_n_latent}')
 
         data_info = self.get_data_info(idx)
-        num_frames, height, width = data_info['num_frames'], data_info['height'], data_info['width']
+        num_frames, height, width = data_info['num_frames'], data_info[
+            'height'], data_info['width']
         kwargs = {
             "text": prompt,
             "index": idx,
@@ -149,10 +163,12 @@ class VideoDataset(Dataset):
                 latents,
                 text_ids.clone(),
                 text_mask.clone(),
-                {k: torch.as_tensor(v) if not isinstance(v, str) else v for k, v in kwargs.items()},
+                {k: torch.as_tensor(v) if not isinstance(v, str) else v for k, v
+                 in kwargs.items()},
             )
         else:
-            text_ids_2, text_mask_2 = self.get_text_tokens(self.text_encoder_2, prompt)
+            text_ids_2, text_mask_2 = self.get_text_tokens(self.text_encoder_2,
+                                                           prompt)
             return (
                 pixel_values,
                 latents,
@@ -160,25 +176,27 @@ class VideoDataset(Dataset):
                 text_mask.clone(),
                 text_ids_2.clone(),
                 text_mask_2.clone(),
-                {k: torch.as_tensor(v) if not isinstance(v, str) else v for k, v in kwargs.items()},
+                {k: torch.as_tensor(v) if not isinstance(v, str) else v for k, v
+                 in kwargs.items()},
             )
 
     def __getitem__(self, idx):
-        try_times = 100
+        try_times = 100  # 尝试 N 次，有意思
         for i in range(try_times):
             try:
                 return self.get_batch(idx)
             except Exception as e:
                 self.logger.warning(
-                    f"Error details: {str(e)}-{self.table['video_id'][idx]}-{traceback.format_exc()}\n")
+                    f"Error details: {str(e)}-{self.table['video_id'][idx]}-"
+                    f"{traceback.format_exc()}\n")
                 idx = np.random.randint(len(self))
 
         raise RuntimeError('Too many bad data.')
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     data_jsons_path = "test_path"
     dataset = VideoDataset(args=None,
-                                      data_jsons_path=data_jsons_path)
+                           data_jsons_path=data_jsons_path)
 
     print(dataset.__getitem__(0))

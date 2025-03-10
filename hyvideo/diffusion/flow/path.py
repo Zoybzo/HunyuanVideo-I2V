@@ -12,6 +12,7 @@ def expand_t_like_x(t, x):
     t = t.view(t.size(0), *dims)
     return t
 
+
 class ICPlan:
     """Linear Coupling Plan"""
 
@@ -43,7 +44,7 @@ class ICPlan:
         alpha_ratio = self.compute_d_alpha_alpha_ratio_t(t)
         sigma_t, d_sigma_t = self.compute_sigma_t(t)
         drift = alpha_ratio * x
-        diffusion = alpha_ratio * (sigma_t**2) - sigma_t * d_sigma_t
+        diffusion = alpha_ratio * (sigma_t ** 2) - sigma_t * d_sigma_t
 
         return -drift, diffusion
 
@@ -84,7 +85,7 @@ class ICPlan:
         sigma_t, d_sigma_t = self.compute_sigma_t(t)
         mean = x
         reverse_alpha_ratio = alpha_t / d_alpha_t
-        var = sigma_t**2 - reverse_alpha_ratio * d_sigma_t * sigma_t
+        var = sigma_t ** 2 - reverse_alpha_ratio * d_sigma_t * sigma_t
         score = (reverse_alpha_ratio * velocity - mean) / var
         return score
 
@@ -122,7 +123,8 @@ class ICPlan:
         alpha_t, _ = self.compute_alpha_t(t)
         sigma_t, _ = self.compute_sigma_t(t)
         if isinstance(x1, (list, tuple)):
-            return [alpha_t[i] * x1[i] + sigma_t[i] * x0[i] for i in range(len(x1))]
+            return [alpha_t[i] * x1[i] + sigma_t[i] * x0[i] for i in
+                    range(len(x1))]
         else:
             return alpha_t * x1 + sigma_t * x0
 
@@ -137,7 +139,8 @@ class ICPlan:
         _, d_alpha_t = self.compute_alpha_t(t)
         _, d_sigma_t = self.compute_sigma_t(t)
         if isinstance(x1, (list, tuple)):
-            return [d_alpha_t * x1[i] + d_sigma_t * x0[i] for i in range(len(x1))]
+            return [d_alpha_t * x1[i] + d_sigma_t * x0[i] for i in
+                    range(len(x1))]
         else:
             return d_alpha_t * x1 + d_sigma_t * x0
 
@@ -154,9 +157,12 @@ class VPCPlan(ICPlan):
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.log_mean_coeff = (
-            lambda t: -0.25 * ((1 - t) ** 2) * (self.sigma_max - self.sigma_min) - 0.5 * (1 - t) * self.sigma_min
+            lambda t: -0.25 * ((1 - t) ** 2) * (
+                    self.sigma_max - self.sigma_min) - 0.5 * (
+                              1 - t) * self.sigma_min
         )
-        self.d_log_mean_coeff = lambda t: 0.5 * (1 - t) * (self.sigma_max - self.sigma_min) + 0.5 * self.sigma_min
+        self.d_log_mean_coeff = lambda t: 0.5 * (1 - t) * (
+                self.sigma_max - self.sigma_min) + 0.5 * self.sigma_min
         self.reverse = reverse
         if self.reverse:
             raise NotImplementedError("Reverse VPCPlan is not implemented")
@@ -172,11 +178,13 @@ class VPCPlan(ICPlan):
         """Compute coefficient of x0"""
         p_sigma_t = 2 * self.log_mean_coeff(t)
         sigma_t = th.sqrt(1 - th.exp(p_sigma_t))
-        d_sigma_t = th.exp(p_sigma_t) * (2 * self.d_log_mean_coeff(t)) / (-2 * sigma_t)
+        d_sigma_t = th.exp(p_sigma_t) * (2 * self.d_log_mean_coeff(t)) / (
+                -2 * sigma_t)
         return sigma_t, d_sigma_t
 
     def compute_d_alpha_alpha_ratio_t(self, t):
-        """Special purposed function for computing numerical stabled d_alpha_t / alpha_t"""
+        """Special purposed function for computing numerical stabled
+        d_alpha_t / alpha_t"""
         return self.d_log_mean_coeff(t)
 
     def compute_drift(self, x, t):
@@ -184,6 +192,7 @@ class VPCPlan(ICPlan):
         t = expand_t_like_x(t, x)
         beta_t = self.sigma_min + (1 - t) * (self.sigma_max - self.sigma_min)
         return -0.5 * beta_t * x, beta_t / 2
+
 
 class GVPCPlan(ICPlan):
     def __init__(self, sigma=0.0, reverse=False):
@@ -204,5 +213,6 @@ class GVPCPlan(ICPlan):
         return sigma_t, d_sigma_t
 
     def compute_d_alpha_alpha_ratio_t(self, t):
-        """Special purposed function for computing numerical stabled d_alpha_t / alpha_t"""
+        """Special purposed function for computing numerical stabled
+        d_alpha_t / alpha_t"""
         return np.pi / (2 * th.tan(t * np.pi / 2))

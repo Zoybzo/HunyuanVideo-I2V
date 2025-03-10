@@ -9,11 +9,13 @@ from loguru import logger
 
 import torch
 import torch.distributed as dist
-from hyvideo.constants import PROMPT_TEMPLATE, NEGATIVE_PROMPT, PRECISION_TO_TYPE, NEGATIVE_PROMPT_I2V
+from hyvideo.constants import PROMPT_TEMPLATE, NEGATIVE_PROMPT, \
+    PRECISION_TO_TYPE, NEGATIVE_PROMPT_I2V
 from hyvideo.vae import load_vae
 from hyvideo.modules import load_model
 from hyvideo.text_encoder import TextEncoder
-from hyvideo.utils.data_utils import align_to, get_closest_ratio, generate_crop_size_list
+from hyvideo.utils.data_utils import align_to, get_closest_ratio, \
+    generate_crop_size_list
 from hyvideo.utils.lora_utils import load_lora_for_pipeline
 from hyvideo.modules.posemb_layers import get_nd_rotary_pos_embed
 from hyvideo.modules.fp8_optimization import convert_fp8_linear
@@ -48,16 +50,18 @@ def parallelize_transformer(pipe):
 
     @functools.wraps(transformer.__class__.forward)
     def new_forward(
-        self,
-        x: torch.Tensor,
-        t: torch.Tensor,  # Should be in range(0, 1000).
-        text_states: torch.Tensor = None,
-        text_mask: torch.Tensor = None,  # Now we don't use it.
-        text_states_2: Optional[torch.Tensor] = None,  # Text embedding for modulation.
-        freqs_cos: Optional[torch.Tensor] = None,
-        freqs_sin: Optional[torch.Tensor] = None,
-        guidance: torch.Tensor = None,  # Guidance for modulation, should be cfg_scale x 1000.
-        return_dict: bool = True,
+            self,
+            x: torch.Tensor,
+            t: torch.Tensor,  # Should be in range(0, 1000).
+            text_states: torch.Tensor = None,
+            text_mask: torch.Tensor = None,  # Now we don't use it.
+            text_states_2: Optional[torch.Tensor] = None,
+            # Text embedding for modulation.
+            freqs_cos: Optional[torch.Tensor] = None,
+            freqs_sin: Optional[torch.Tensor] = None,
+            guidance: torch.Tensor = None,
+            # Guidance for modulation, should be cfg_scale x 1000.
+            return_dict: bool = True,
     ):
         if x.shape[-2] // 2 % get_sequence_parallel_world_size() == 0:
             # try to split x by height
@@ -66,24 +70,31 @@ def parallelize_transformer(pipe):
             # try to split x by width
             split_dim = -1
         else:
-            raise ValueError(f"Cannot split video sequence into ulysses_degree x ring_degree ({get_sequence_parallel_world_size()}) parts evenly")
+            raise ValueError(
+                f"Cannot split video sequence into ulysses_degree x "
+                f"ring_degree ({get_sequence_parallel_world_size()}) parts "
+                f"evenly")
 
-        # patch sizes for the temporal, height, and width dimensions are 1, 2, and 2.
+        # patch sizes for the temporal, height, and width dimensions are 1,
+        # 2, and 2.
         temporal_size, h, w = x.shape[2], x.shape[3] // 2, x.shape[4] // 2
 
-        x = torch.chunk(x, get_sequence_parallel_world_size(),dim=split_dim)[get_sequence_parallel_rank()]
+        x = torch.chunk(x, get_sequence_parallel_world_size(), dim=split_dim)[
+            get_sequence_parallel_rank()]
 
         dim_thw = freqs_cos.shape[-1]
         freqs_cos = freqs_cos.reshape(temporal_size, h, w, dim_thw)
-        freqs_cos = torch.chunk(freqs_cos, get_sequence_parallel_world_size(),dim=split_dim - 1)[get_sequence_parallel_rank()]
+        freqs_cos = torch.chunk(freqs_cos, get_sequence_parallel_world_size(),
+                                dim=split_dim - 1)[get_sequence_parallel_rank()]
         freqs_cos = freqs_cos.reshape(-1, dim_thw)
         dim_thw = freqs_sin.shape[-1]
         freqs_sin = freqs_sin.reshape(temporal_size, h, w, dim_thw)
-        freqs_sin = torch.chunk(freqs_sin, get_sequence_parallel_world_size(),dim=split_dim - 1)[get_sequence_parallel_rank()]
+        freqs_sin = torch.chunk(freqs_sin, get_sequence_parallel_world_size(),
+                                dim=split_dim - 1)[get_sequence_parallel_rank()]
         freqs_sin = freqs_sin.reshape(-1, dim_thw)
-        
+
         from xfuser.core.long_ctx_attention import xFuserLongContextAttention
-        
+
         for block in transformer.double_blocks + transformer.single_blocks:
             block.hybrid_seq_parallel_attn = xFuserLongContextAttention()
 
@@ -107,22 +118,22 @@ def parallelize_transformer(pipe):
 
     new_forward = new_forward.__get__(transformer)
     transformer.forward = new_forward
-    
+
 
 class Inference(object):
     def __init__(
-        self,
-        args,
-        vae,
-        vae_kwargs,
-        text_encoder,
-        model,
-        text_encoder_2=None,
-        pipeline=None,
-        use_cpu_offload=False,
-        device=None,
-        logger=None,
-        parallel_args=None,
+            self,
+            args,
+            vae,
+            vae_kwargs,
+            text_encoder,
+            model,
+            text_encoder_2=None,
+            pipeline=None,
+            use_cpu_offload=False,
+            device=None,
+            logger=None,
+            parallel_args=None,
     ):
         self.vae = vae
         self.vae_kwargs = vae_kwargs
@@ -146,19 +157,23 @@ class Inference(object):
         self.parallel_args = parallel_args
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_path, args, device=None, **kwargs):
+    def from_pretrained(cls, pretrained_model_path, args, device=None,
+                        **kwargs):
         """
         Initialize the Inference pipeline.
 
         Args:
-            pretrained_model_path (str or pathlib.Path): The model path, including t2v, text encoder and vae checkpoints.
+            pretrained_model_path (str or pathlib.Path): The model path,
+            including t2v, text encoder and vae checkpoints.
             args (argparse.Namespace): The arguments for the pipeline.
             device (int): The device for inference. Default is 0.
         """
         # ========================================================================
-        logger.info(f"Got text-to-video model root path: {pretrained_model_path}")
-        
-        # ==================== Initialize Distributed Environment ================
+        logger.info(
+            f"Got text-to-video model root path: {pretrained_model_path}")
+
+        # ==================== Initialize Distributed Environment
+        # ================
         if args.ulysses_degree > 1 or args.ring_degree > 1:
             assert xfuser is not None, \
                 "Ulysses Attention and Ring Attention requires xfuser package."
@@ -168,11 +183,14 @@ class Inference(object):
 
             dist.init_process_group("nccl")
 
-            assert dist.get_world_size() == args.ring_degree * args.ulysses_degree, \
-                "number of GPUs should be equal to ring_degree * ulysses_degree."
+            assert (dist.get_world_size() == args.ring_degree *
+                    args.ulysses_degree), \
+                ("number of GPUs should be equal to ring_degree * "
+                 "ulysses_degree.")
 
-            init_distributed_environment(rank=dist.get_rank(), world_size=dist.get_world_size())
-            
+            init_distributed_environment(rank=dist.get_rank(),
+                                         world_size=dist.get_world_size())
+
             initialize_model_parallel(
                 sequence_parallel_degree=dist.get_world_size(),
                 ring_degree=args.ring_degree,
@@ -183,16 +201,20 @@ class Inference(object):
             if device is None:
                 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        parallel_args = {"ulysses_degree": args.ulysses_degree, "ring_degree": args.ring_degree}
+        parallel_args = {"ulysses_degree": args.ulysses_degree,
+                         "ring_degree": args.ring_degree}
 
-        # ======================== Get the args path =============================
+        # ======================== Get the args path
+        # =============================
 
         # Disable gradient
         torch.set_grad_enabled(False)
 
-        # =========================== Build main model ===========================
+        # =========================== Build main model
+        # ===========================
         logger.info("Building model...")
-        factor_kwargs = {"device": device, "dtype": PRECISION_TO_TYPE[args.precision]}
+        factor_kwargs = {"device": device,
+                         "dtype": PRECISION_TO_TYPE[args.precision]}
         if args.i2v_mode:
             in_channels = args.latent_channels * 2 + 1
         else:
@@ -210,12 +232,14 @@ class Inference(object):
         )
 
         if args.use_fp8:
-            convert_fp8_linear(model, args.dit_weight, original_dtype=PRECISION_TO_TYPE[args.precision])
+            convert_fp8_linear(model, args.dit_weight,
+                               original_dtype=PRECISION_TO_TYPE[args.precision])
         model = model.to(device)
         model = Inference.load_state_dict(args, model, pretrained_model_path)
         model.eval()
 
-        # ============================= Build extra models ========================
+        # ============================= Build extra models
+        # ========================
         # VAE
         vae, _, s_ratio, t_ratio = load_vae(
             args.vae,
@@ -237,7 +261,8 @@ class Inference(object):
                 "crop_start", 0
             )
         elif args.prompt_template is not None:
-            crop_start = PROMPT_TEMPLATE[args.prompt_template].get("crop_start", 0)
+            crop_start = PROMPT_TEMPLATE[args.prompt_template].get("crop_start",
+                                                                   0)
         else:
             crop_start = 0
         max_length = args.text_len + crop_start
@@ -312,20 +337,27 @@ class Inference(object):
                 model_path = dit_weight / f"pytorch_model_{load_key}.pt"
                 bare_model = True
             elif any(str(f).endswith("_model_states.pt") for f in files):
-                files = [f for f in files if str(f).endswith("_model_states.pt")]
+                files = [f for f in files if
+                         str(f).endswith("_model_states.pt")]
                 model_path = files[0]
                 if len(files) > 1:
                     logger.warning(
-                        f"Multiple model weights found in {dit_weight}, using {model_path}"
+                        f"Multiple model weights found in {dit_weight}, "
+                        f"using {model_path}"
                     )
                 bare_model = False
             else:
                 raise ValueError(
-                    f"Invalid model path: {dit_weight} with unrecognized weight format: "
-                    f"{list(map(str, files))}. When given a directory as --dit-weight, only "
-                    f"`pytorch_model_*.pt`(provided by HunyuanDiT official) and "
-                    f"`*_model_states.pt`(saved by deepspeed) can be parsed. If you want to load a "
-                    f"specific weight file, please provide the full path to the file."
+                    f"Invalid model path: {dit_weight} with unrecognized "
+                    f"weight format: "
+                    f"{list(map(str, files))}. When given a directory as "
+                    f"--dit-weight, only "
+                    f"`pytorch_model_*.pt`(provided by HunyuanDiT official) "
+                    f"and "
+                    f"`*_model_states.pt`(saved by deepspeed) can be parsed. "
+                    f"If you want to load a "
+                    f"specific weight file, please provide the full path to "
+                    f"the file."
                 )
         else:
             if dit_weight.is_dir():
@@ -336,20 +368,27 @@ class Inference(object):
                     model_path = dit_weight / f"pytorch_model_{load_key}.pt"
                     bare_model = True
                 elif any(str(f).endswith("_model_states.pt") for f in files):
-                    files = [f for f in files if str(f).endswith("_model_states.pt")]
+                    files = [f for f in files if
+                             str(f).endswith("_model_states.pt")]
                     model_path = files[0]
                     if len(files) > 1:
                         logger.warning(
-                            f"Multiple model weights found in {dit_weight}, using {model_path}"
+                            f"Multiple model weights found in {dit_weight}, "
+                            f"using {model_path}"
                         )
                     bare_model = False
                 else:
                     raise ValueError(
-                        f"Invalid model path: {dit_weight} with unrecognized weight format: "
-                        f"{list(map(str, files))}. When given a directory as --dit-weight, only "
-                        f"`pytorch_model_*.pt`(provided by HunyuanDiT official) and "
-                        f"`*_model_states.pt`(saved by deepspeed) can be parsed. If you want to load a "
-                        f"specific weight file, please provide the full path to the file."
+                        f"Invalid model path: {dit_weight} with unrecognized "
+                        f"weight format: "
+                        f"{list(map(str, files))}. When given a directory as "
+                        f"--dit-weight, only "
+                        f"`pytorch_model_*.pt`(provided by HunyuanDiT "
+                        f"official) and "
+                        f"`*_model_states.pt`(saved by deepspeed) can be "
+                        f"parsed. If you want to load a "
+                        f"specific weight file, please provide the full path "
+                        f"to the file."
                     )
             elif dit_weight.is_file():
                 model_path = dit_weight
@@ -360,16 +399,19 @@ class Inference(object):
         if not model_path.exists():
             raise ValueError(f"model_path not exists: {model_path}")
         logger.info(f"Loading torch model {model_path}...")
-        state_dict = torch.load(model_path, map_location=lambda storage, loc: storage)
+        state_dict = torch.load(model_path,
+                                map_location=lambda storage, loc: storage)
 
-        if bare_model == "unknown" and ("ema" in state_dict or "module" in state_dict):
+        if bare_model == "unknown" and (
+                "ema" in state_dict or "module" in state_dict):
             bare_model = False
         if bare_model is False:
             if load_key in state_dict:
                 state_dict = state_dict[load_key]
             else:
                 raise KeyError(
-                    f"Missing key: `{load_key}` in the checkpoint: {model_path}. The keys in the checkpoint "
+                    f"Missing key: `{load_key}` in the checkpoint: "
+                    f"{model_path}. The keys in the checkpoint "
                     f"are: {list(state_dict.keys())}."
                 )
         model.load_state_dict(state_dict, strict=True)
@@ -380,28 +422,30 @@ class Inference(object):
         if isinstance(size, int):
             size = [size]
         if not isinstance(size, (list, tuple)):
-            raise ValueError(f"Size must be an integer or (height, width), got {size}.")
+            raise ValueError(
+                f"Size must be an integer or (height, width), got {size}.")
         if len(size) == 1:
             size = [size[0], size[0]]
         if len(size) != 2:
-            raise ValueError(f"Size must be an integer or (height, width), got {size}.")
+            raise ValueError(
+                f"Size must be an integer or (height, width), got {size}.")
         return size
 
 
 class HunyuanVideoSampler(Inference):
     def __init__(
-        self,
-        args,
-        vae,
-        vae_kwargs,
-        text_encoder,
-        model,
-        text_encoder_2=None,
-        pipeline=None,
-        use_cpu_offload=False,
-        device=0,
-        logger=None,
-        parallel_args=None
+            self,
+            args,
+            vae,
+            vae_kwargs,
+            text_encoder,
+            model,
+            text_encoder_2=None,
+            pipeline=None,
+            use_cpu_offload=False,
+            device=0,
+            logger=None,
+            parallel_args=None
     ):
         super().__init__(
             args,
@@ -430,25 +474,30 @@ class HunyuanVideoSampler(Inference):
             self.default_negative_prompt = NEGATIVE_PROMPT_I2V
             if args.use_lora:
                 self.pipeline = load_lora_for_pipeline(
-                    self.pipeline, args.lora_path, LORA_PREFIX_TRANSFORMER="Hunyuan_video_I2V_lora", alpha=args.lora_scale,
+                    self.pipeline, args.lora_path,
+                    LORA_PREFIX_TRANSFORMER="Hunyuan_video_I2V_lora",
+                    alpha=args.lora_scale,
                     device=self.device)
-                logger.info(f"load lora {args.lora_path} into pipeline, lora scale is {args.lora_scale}.")
+                logger.info(
+                    f"load lora {args.lora_path} into pipeline, lora scale is "
+                    f"{args.lora_scale}.")
         else:
             self.default_negative_prompt = NEGATIVE_PROMPT
 
-        if self.parallel_args['ulysses_degree'] > 1 or self.parallel_args['ring_degree'] > 1:
+        if self.parallel_args['ulysses_degree'] > 1 or self.parallel_args[
+            'ring_degree'] > 1:
             parallelize_transformer(self.pipeline)
 
     def load_diffusion_pipeline(
-        self,
-        args,
-        vae,
-        text_encoder,
-        text_encoder_2,
-        model,
-        scheduler=None,
-        device=None,
-        progress_bar_config=None,
+            self,
+            args,
+            vae,
+            text_encoder,
+            text_encoder_2,
+            model,
+            scheduler=None,
+            device=None,
+            progress_bar_config=None,
     ):
         """Load the denoising scheduler for inference."""
         if scheduler is None:
@@ -482,15 +531,19 @@ class HunyuanVideoSampler(Inference):
         ndim = 5 - 2
         # 884
         if "884" in self.args.vae:
-            latents_size = [(video_length - 1) // 4 + 1, height // 8, width // 8]
+            latents_size = [(video_length - 1) // 4 + 1, height // 8,
+                            width // 8]
         elif "888" in self.args.vae:
-            latents_size = [(video_length - 1) // 8 + 1, height // 8, width // 8]
+            latents_size = [(video_length - 1) // 8 + 1, height // 8,
+                            width // 8]
         else:
             latents_size = [video_length, height // 8, width // 8]
 
+        # 根据 patch size 计算 rope 的 size
         if isinstance(self.model.patch_size, int):
             assert all(s % self.model.patch_size == 0 for s in latents_size), (
-                f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.model.patch_size}), "
+                f"Latent size(last {ndim} dimensions) should be divisible by "
+                f"patch size({self.model.patch_size}), "
                 f"but got {latents_size}."
             )
             rope_sizes = [s // self.model.patch_size for s in latents_size]
@@ -499,21 +552,28 @@ class HunyuanVideoSampler(Inference):
                 s % self.model.patch_size[idx] == 0
                 for idx, s in enumerate(latents_size)
             ), (
-                f"Latent size(last {ndim} dimensions) should be divisible by patch size({self.model.patch_size}), "
+                f"Latent size(last {ndim} dimensions) should be divisible by "
+                f"patch size({self.model.patch_size}), "
                 f"but got {latents_size}."
             )
             rope_sizes = [
-                s // self.model.patch_size[idx] for idx, s in enumerate(latents_size)
+                s // self.model.patch_size[idx] for idx, s in
+                enumerate(latents_size)
             ]
 
         if len(rope_sizes) != target_ndim:
-            rope_sizes = [1] * (target_ndim - len(rope_sizes)) + rope_sizes  # time axis
+            # 什么情况下会不相等？patch_size不是int也不是list的情况下应该没有rope_sizes
+            # 那么rope_sizes理论上和target_dim一定相等；除非target_dim != 3
+            # 所以这种情况下就补全 rope
+            rope_sizes = [1] * (
+                    target_ndim - len(rope_sizes)) + rope_sizes  # time axis
         head_dim = self.model.hidden_size // self.model.heads_num
         rope_dim_list = self.model.rope_dim_list
         if rope_dim_list is None:
-            rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
+            rope_dim_list = [head_dim // target_ndim for _ in
+                             range(target_ndim)]
         assert (
-            sum(rope_dim_list) == head_dim
+                sum(rope_dim_list) == head_dim
         ), "sum(rope_dim_list) should equal to head_dim of attention layer"
         freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
             rope_dim_list,
@@ -526,23 +586,23 @@ class HunyuanVideoSampler(Inference):
 
     @torch.no_grad()
     def predict(
-        self,
-        prompt,
-        height=192,
-        width=336,
-        video_length=129,
-        seed=None,
-        negative_prompt=None,
-        infer_steps=50,
-        guidance_scale=6.0,
-        flow_shift=5.0,
-        embedded_guidance_scale=None,
-        batch_size=1,
-        num_videos_per_prompt=1,
-        i2v_mode=False,
-        i2v_resolution="720p",
-        i2v_image_path=None,
-        **kwargs,
+            self,
+            prompt,
+            height=192,
+            width=336,
+            video_length=129,
+            seed=None,
+            negative_prompt=None,
+            infer_steps=50,
+            guidance_scale=6.0,
+            flow_shift=5.0,
+            embedded_guidance_scale=None,
+            batch_size=1,
+            num_videos_per_prompt=1,
+            i2v_mode=False,
+            i2v_resolution="720p",
+            i2v_image_path=None,
+            **kwargs,
     ):
         """
         Predict the image/video from the given text.
@@ -552,18 +612,27 @@ class HunyuanVideoSampler(Inference):
             kwargs:
                 height (int): The height of the output video. Default is 192.
                 width (int): The width of the output video. Default is 336.
-                video_length (int): The frame number of the output video. Default is 129.
-                seed (int or List[str]): The random seed for the generation. Default is a random integer.
-                negative_prompt (str or List[str]): The negative text prompt. Default is an empty string.
+                video_length (int): The frame number of the output video.
+                Default is 129.
+                seed (int or List[str]): The random seed for the generation.
+                Default is a random integer.
+                negative_prompt (str or List[str]): The negative text prompt.
+                Default is an empty string.
                 infer_steps (int): The number of inference steps. Default is 50.
-                guidance_scale (float): The guidance scale for the generation. Default is 6.0.
-                flow_shift (float): The flow shift for the generation. Default is 5.0.
-                embedded_guidance_scale (float): embedded guidance scale for the generation. Default is None.
+                guidance_scale (float): The guidance scale for the
+                generation. Default is 6.0.
+                flow_shift (float): The flow shift for the generation.
+                Default is 5.0.
+                embedded_guidance_scale (float): embedded guidance scale for
+                the generation. Default is None.
                 batch_size (int): batch size for inference. Default is 1.
-                num_images_per_prompt (int): The number of images per prompt. Default is 1.
+                num_images_per_prompt (int): The number of images per prompt.
+                Default is 1.
                 i2v_mode (bool): Whether to open i2v mode. Default is False.
-                i2v_resolution (str): Resolution for i2v inference. Default is 720p.
-                i2v_image_path (str): Image path for i2v inference. Default is None.
+                i2v_resolution (str): Resolution for i2v inference. Default
+                is 720p.
+                i2v_image_path (str): Image path for i2v inference. Default
+                is None.
         """
         out_dict = dict()
 
@@ -594,14 +663,18 @@ class HunyuanVideoSampler(Inference):
                 seeds = [int(s) for s in seed]
             else:
                 raise ValueError(
-                    f"Length of seed must be equal to number of prompt(batch_size) or "
-                    f"batch_size * num_videos_per_prompt ({batch_size} * {num_videos_per_prompt}), got {seed}."
+                    f"Length of seed must be equal to number of prompt("
+                    f"batch_size) or "
+                    f"batch_size * num_videos_per_prompt ({batch_size} * "
+                    f"{num_videos_per_prompt}), got {seed}."
                 )
         else:
             raise ValueError(
-                f"Seed must be an integer, a list of integers, or None, got {seed}."
+                f"Seed must be an integer, a list of integers, or None, "
+                f"got {seed}."
             )
-        generator = [torch.Generator(self.device).manual_seed(seed) for seed in seeds]
+        generator = [torch.Generator(self.device).manual_seed(seed) for seed in
+                     seeds]
         out_dict["seeds"] = seeds
 
         # ========================================================================
@@ -609,7 +682,9 @@ class HunyuanVideoSampler(Inference):
         # ========================================================================
         if width <= 0 or height <= 0 or video_length <= 0:
             raise ValueError(
-                f"`height` and `width` and `video_length` must be positive integers, got height={height}, width={width}, video_length={video_length}"
+                f"`height` and `width` and `video_length` must be positive "
+                f"integers, got height={height}, width={width}, "
+                f"video_length={video_length}"
             )
         if (video_length - 1) % 4 != 0:
             raise ValueError(
@@ -617,7 +692,8 @@ class HunyuanVideoSampler(Inference):
             )
 
         logger.info(
-            f"Input (height, width, video_length) = ({height}, {width}, {video_length})"
+            f"Input (height, width, video_length) = ({height}, {width}, "
+            f"{video_length})"
         )
 
         target_height = align_to(height, 16)
@@ -630,7 +706,8 @@ class HunyuanVideoSampler(Inference):
         # Arguments: prompt, new_prompt, negative_prompt
         # ========================================================================
         if not isinstance(prompt, str):
-            raise TypeError(f"`prompt` must be a string, but got {type(prompt)}")
+            raise TypeError(
+                f"`prompt` must be a string, but got {type(prompt)}")
         prompt = [prompt.strip()]
 
         # negative prompt
@@ -640,7 +717,8 @@ class HunyuanVideoSampler(Inference):
             negative_prompt = ""
         if not isinstance(negative_prompt, str):
             raise TypeError(
-                f"`negative_prompt` must be a string, but got {type(negative_prompt)}"
+                f"`negative_prompt` must be a string, but got {type(
+                    negative_prompt)}"
             )
         negative_prompt = [negative_prompt.strip()]
 
@@ -667,14 +745,20 @@ class HunyuanVideoSampler(Inference):
             elif i2v_resolution == "360p":
                 bucket_hw_base_size = 480
             else:
-                raise ValueError(f"i2v_resolution: {i2v_resolution} must be in [360p, 540p, 720p]")
+                raise ValueError(
+                    f"i2v_resolution: {i2v_resolution} must be in [360p, "
+                    f"540p, 720p]")
 
             semantic_images = [Image.open(i2v_image_path).convert('RGB')]
             origin_size = semantic_images[0].size
 
             crop_size_list = generate_crop_size_list(bucket_hw_base_size, 32)
-            aspect_ratios = np.array([round(float(h)/float(w), 5) for h, w in crop_size_list])
-            closest_size, closest_ratio = get_closest_ratio(origin_size[1], origin_size[0], aspect_ratios, crop_size_list)
+            aspect_ratios = np.array(
+                [round(float(h) / float(w), 5) for h, w in crop_size_list])
+            closest_size, closest_ratio = get_closest_ratio(origin_size[1],
+                                                            origin_size[0],
+                                                            aspect_ratios,
+                                                            crop_size_list)
             ref_image_transform = transforms.Compose([
                 transforms.Resize(closest_size),
                 transforms.CenterCrop(closest_size),
@@ -682,11 +766,18 @@ class HunyuanVideoSampler(Inference):
                 transforms.Normalize([0.5], [0.5])
             ])
 
-            semantic_image_pixel_values = [ref_image_transform(semantic_image) for semantic_image in semantic_images]
-            semantic_image_pixel_values = torch.cat(semantic_image_pixel_values).unsqueeze(0).unsqueeze(2).to(self.device)
+            semantic_image_pixel_values = [ref_image_transform(semantic_image)
+                                           for semantic_image in
+                                           semantic_images]
+            semantic_image_pixel_values = torch.cat(
+                semantic_image_pixel_values).unsqueeze(0).unsqueeze(2).to(
+                self.device)
 
-            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=True):
-                img_latents = self.pipeline.vae.encode(semantic_image_pixel_values).latent_dist.mode() # B, C, F, H, W
+            with torch.autocast(device_type="cuda", dtype=torch.float16,
+                                enabled=True):
+                img_latents = self.pipeline.vae.encode(
+                    semantic_image_pixel_values).latent_dist.mode()  # B, C,
+                # F, H, W
                 img_latents.mul_(self.pipeline.vae.config.scaling_factor)
 
             target_height, target_width = closest_size

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export MODEL_BASE="${MHOME}/HunyuanVideo-I2V"
+
 python3 sample_image2video.py \
     --prompt "A man with short gray hair plays a red electric guitar." \
     --i2v-image-path ./assets/demo/i2v/imgs/0.png \
@@ -13,6 +15,7 @@ python3 sample_image2video.py \
     --seed 0 \
     --use-cpu-offload \
     --save-path ./results \
+    --model-base ${MODEL_BASE} \
 
 # More examples
 #    --prompt "A woman sits on a wooden floor, holding a colorful bag." \

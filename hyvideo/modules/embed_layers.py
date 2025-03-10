@@ -11,25 +11,27 @@ class PatchEmbed(nn.Module):
 
     Image to Patch Embedding using Conv2d
 
-    A convolution based approach to patchifying a 2D image w/ embedding projection.
+    A convolution based approach to patchifying a 2D image w/ embedding
+    projection.
 
     Based on the impl in https://github.com/google-research/vision_transformer
 
     Hacked together by / Copyright 2020 Ross Wightman
 
-    Remove the _assert function in forward function to be compatible with multi-resolution images.
+    Remove the _assert function in forward function to be compatible with
+    multi-resolution images.
     """
 
     def __init__(
-        self,
-        patch_size=16,
-        in_chans=3,
-        embed_dim=768,
-        norm_layer=None,
-        flatten=True,
-        bias=True,
-        dtype=None,
-        device=None,
+            self,
+            patch_size=16,
+            in_chans=3,
+            embed_dim=768,
+            norm_layer=None,
+            flatten=True,
+            bias=True,
+            dtype=None,
+            device=None,
     ):
         factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
@@ -45,7 +47,8 @@ class PatchEmbed(nn.Module):
             bias=bias,
             **factory_kwargs
         )
-        nn.init.xavier_uniform_(self.proj.weight.view(self.proj.weight.size(0), -1))
+        nn.init.xavier_uniform_(
+            self.proj.weight.view(self.proj.weight.size(0), -1))
         if bias:
             nn.init.zeros_(self.proj.bias)
 
@@ -63,10 +66,12 @@ class TextProjection(nn.Module):
     """
     Projects text embeddings. Also handles dropout for classifier-free guidance.
 
-    Adapted from https://github.com/PixArt-alpha/PixArt-alpha/blob/master/diffusion/model/nets/PixArt_blocks.py
+    Adapted from https://github.com/PixArt-alpha/PixArt-alpha/blob/master
+    /diffusion/model/nets/PixArt_blocks.py
     """
 
-    def __init__(self, in_channels, hidden_size, act_layer, dtype=None, device=None):
+    def __init__(self, in_channels, hidden_size, act_layer, dtype=None,
+                 device=None):
         factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
         self.linear_1 = nn.Linear(
@@ -95,14 +100,16 @@ def timestep_embedding(t, dim, max_period=10000):
     Create sinusoidal timestep embeddings.
 
     Args:
-        t (torch.Tensor): a 1-D Tensor of N indices, one per batch element. These may be fractional.
+        t (torch.Tensor): a 1-D Tensor of N indices, one per batch element.
+        These may be fractional.
         dim (int): the dimension of the output.
         max_period (int): controls the minimum frequency of the embeddings.
 
     Returns:
         embedding (torch.Tensor): An (N, D) Tensor of positional embeddings.
 
-    .. ref_link: https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
+    .. ref_link: https://github.com/openai/glide-text2im/blob/main
+    /glide_text2im/nn.py
     """
     half = dim // 2
     freqs = torch.exp(
@@ -113,7 +120,8 @@ def timestep_embedding(t, dim, max_period=10000):
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
-        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])],
+                              dim=-1)
     return embedding
 
 
@@ -123,14 +131,14 @@ class TimestepEmbedder(nn.Module):
     """
 
     def __init__(
-        self,
-        hidden_size,
-        act_layer,
-        frequency_embedding_size=256,
-        max_period=10000,
-        out_size=None,
-        dtype=None,
-        device=None,
+            self,
+            hidden_size,
+            act_layer,
+            frequency_embedding_size=256,
+            max_period=10000,
+            out_size=None,
+            dtype=None,
+            device=None,
     ):
         factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
@@ -141,7 +149,8 @@ class TimestepEmbedder(nn.Module):
 
         self.mlp = nn.Sequential(
             nn.Linear(
-                frequency_embedding_size, hidden_size, bias=True, **factory_kwargs
+                frequency_embedding_size, hidden_size, bias=True,
+                **factory_kwargs
             ),
             act_layer(),
             nn.Linear(hidden_size, out_size, bias=True, **factory_kwargs),

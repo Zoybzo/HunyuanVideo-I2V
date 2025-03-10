@@ -2,6 +2,7 @@ from .pipelines import HunyuanVideoPipeline
 from .schedulers import FlowMatchDiscreteScheduler
 from .flow.transport import *
 
+
 def create_transport(
         *,
         path_type,
@@ -49,7 +50,8 @@ def create_transport(
     if path_type in [PathType.VP]:
         train_eps = 1e-5 if train_eps is None else train_eps
         sample_eps = 1e-3 if train_eps is None else sample_eps
-    elif path_type in [PathType.GVP, PathType.LINEAR] and model_type != ModelType.VELOCITY:
+    elif path_type in [PathType.GVP,
+                       PathType.LINEAR] and model_type != ModelType.VELOCITY:
         train_eps = 1e-3 if train_eps is None else train_eps
         sample_eps = 1e-3 if train_eps is None else sample_eps
     else:  # velocity & [GVP, LINEAR] is stable everywhere
@@ -70,6 +72,7 @@ def create_transport(
     )
 
     return state
+
 
 def load_denoiser(args):
     if args.denoise_type == "flow":

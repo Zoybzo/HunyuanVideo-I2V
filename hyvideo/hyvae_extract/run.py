@@ -27,16 +27,17 @@ def seed_everything(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+
 @torch.no_grad()
 def extract(
-    vae: torch.nn.Module,
-    meta_files: List[str],
-    output_base_dir: str,
-    sample_n_frames: int,
-    target_size: Tuple[int, int],
-    enable_multi_aspect_ratio: bool = False,
-    use_stride: bool = False,
-    batch_size=None,
+        vae: torch.nn.Module,
+        meta_files: List[str],
+        output_base_dir: str,
+        sample_n_frames: int,
+        target_size: Tuple[int, int],
+        enable_multi_aspect_ratio: bool = False,
+        use_stride: bool = False,
+        batch_size=None,
 ):
     dataset = VideoDataset(
         meta_files=meta_files,
@@ -60,7 +61,8 @@ def extract(
         prefetch_factor=4,
         pin_memory=False,
     )
-    normalize_fn = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+    normalize_fn = transforms.Normalize(mean=[0.5, 0.5, 0.5],
+                                        std=[0.5, 0.5, 0.5], inplace=True)
 
     save_json_path = Path(output_base_dir) / "json_path"
     if not os.path.exists(save_json_path):
@@ -90,25 +92,27 @@ def extract(
                 save_path = Path(output_base_dir) / f"{item['videoid'][k]}.npy"
                 np.save(save_path, z[k][None, ...])
                 data = {"video_id": item["videoid"][k],
-                    "latent_shape": z[k][None,...].shape,
-                    "video_path": item["video_path"][k], 
-                    "prompt": item["prompt"][k],
-                    "npy_save_path": str(save_path)}
-                with open(save_json_path / f"{item['videoid'][k]}.json", "w", encoding='utf-8') as f:
+                        "latent_shape": z[k][None, ...].shape,
+                        "video_path": item["video_path"][k],
+                        "prompt": item["prompt"][k],
+                        "npy_save_path": str(save_path)}
+                with open(save_json_path / f"{item['videoid'][k]}.json", "w",
+                          encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False)
         except Exception as e:
             traceback.print_exc()
 
+
 def main(
-    local_rank: int,
-    vae_path: str,
-    meta_files: str,
-    output_base_dir: str,
-    sample_n_frames: int,
-    target_size: Tuple[int, int],
-    enable_multi_aspect_ratio: bool = False,
-    use_stride: bool = False,
-    seed: int = 42,
+        local_rank: int,
+        vae_path: str,
+        meta_files: str,
+        output_base_dir: str,
+        sample_n_frames: int,
+        target_size: Tuple[int, int],
+        enable_multi_aspect_ratio: bool = False,
+        use_stride: bool = False,
+        seed: int = 42,
 ):
     seed_everything(seed)
 
@@ -116,7 +120,8 @@ def main(
     world_size = int(os.environ["HOST_GPU_NUM"])
 
     print(f"split video urls")
-    start, end, meta_files = split_video_urls(meta_files, global_rank, world_size)
+    start, end, meta_files = split_video_urls(meta_files, global_rank,
+                                              world_size)
 
     print(f"Load VAE")
     vae, vae_path, spatial_compression_ratio, time_compression_ratio = load_vae(
@@ -131,7 +136,9 @@ def main(
     vae.eval()
 
     print(f"processing video latent extraction")
-    extract(vae, meta_files, output_base_dir, sample_n_frames, target_size, enable_multi_aspect_ratio, use_stride)
+    extract(vae, meta_files, output_base_dir, sample_n_frames, target_size,
+            enable_multi_aspect_ratio, use_stride)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -149,4 +156,5 @@ if __name__ == "__main__":
     use_stride = config.use_stride
     meta_files = config.video_url_files
 
-    main(args.local_rank, vae_path, meta_files, output_base_dir, sample_n_frames, target_size, enable_multi_aspect_ratio, use_stride)
+    main(args.local_rank, vae_path, meta_files, output_base_dir,
+         sample_n_frames, target_size, enable_multi_aspect_ratio, use_stride)

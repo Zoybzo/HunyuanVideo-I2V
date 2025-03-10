@@ -6,13 +6,14 @@ import torch.nn as nn
 
 class ModulateDiT(nn.Module):
     """Modulation layer for DiT."""
+
     def __init__(
-        self,
-        hidden_size: int,
-        factor: int,
-        act_layer: Callable,
-        dtype=None,
-        device=None,
+            self,
+            hidden_size: int,
+            factor: int,
+            act_layer: Callable,
+            dtype=None,
+            device=None,
     ):
         factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()

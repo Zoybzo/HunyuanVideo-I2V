@@ -22,7 +22,9 @@ def is_rocm_pytorch() -> bool:
             pass
     return is_rocm
 
+
 TORCH_VERSION = torch.__version__
+
 
 def get_build_config():
     """Obtain the build information of PyTorch or Parrots."""
@@ -32,18 +34,23 @@ def get_build_config():
     else:
         return torch.__config__.show()
 
+
 try:
     import torch_musa  # noqa: F401
+
     IS_MUSA_AVAILABLE = True
 except Exception:
     IS_MUSA_AVAILABLE = False
 
+
 def is_musa_available() -> bool:
     return IS_MUSA_AVAILABLE
+
 
 def is_cuda_available() -> bool:
     """Returns True if cuda devices exist."""
     return torch.cuda.is_available()
+
 
 def _get_cuda_home():
     if TORCH_VERSION == 'parrots':
@@ -175,8 +182,8 @@ def collect_env():
     except io.UnsupportedOperation as e:
         # JupyterLab on Windows changes sys.stdout, which has no `fileno` attr
         # Refer to: https://github.com/open-mmlab/mmengine/issues/931
-        # TODO: find a solution to get compiler info in Windows JupyterLab,
-        # while preserving backward-compatibility in other systems.
+        # OriginalTODO: find a solution to get compiler info in Windows
+        #  JupyterLab, while preserving backward-compatibility in other systems.
         env_info['MSVC'] = f'n/a, reason: {str(e)}'
 
     env_info['PyTorch'] = torch.__version__
@@ -194,8 +201,8 @@ def collect_env():
     except ImportError:
         pass
 
-
     return env_info
+
 
 if __name__ == '__main__':
     for name, val in collect_env().items():
